@@ -1437,7 +1437,7 @@ ImFontConfig::ImFontConfig()
 const int FONT_ATLAS_DEFAULT_TEX_DATA_W_HALF = 108;
 const int FONT_ATLAS_DEFAULT_TEX_DATA_H      = 27;
 const unsigned int FONT_ATLAS_DEFAULT_TEX_DATA_ID = 0x80000000;
-static const char FONT_ATLAS_DEFAULT_TEX_DATA_PIXELS[FONT_ATLAS_DEFAULT_TEX_DATA_W_HALF * FONT_ATLAS_DEFAULT_TEX_DATA_H + 1] =
+static const char FONT_ATLAS_DEFAULT_TEX_DATA_PIXELS[] =
 {
     "..-         -XXXXXXX-    X    -           X           -XXXXXXX          -          XXXXXXX-     XX          "
     "..-         -X.....X-   X.X   -          X.X          -X.....X          -          X.....X-    X..X         "
@@ -3264,7 +3264,7 @@ static unsigned int stb_decompress(unsigned char *output, const unsigned char *i
 // Exported using misc/fonts/binary_to_compressed_c.cpp (with compression + base85 string encoding).
 // The purpose of encoding as base85 instead of "0x00,0x01,..." style is only save on _source code_ size.
 //-----------------------------------------------------------------------------
-static const char proggy_clean_ttf_compressed_data_base85[11980+1] =
+static const char proggy_clean_ttf_compressed_data_base85[] =
     "7])#######hV0qs'/###[),##/l:$#Q6>##5[n42>c-TH`->>#/e>11NNV=Bv(*:.F?uu#(gRU.o0XGH`$vhLG1hxt9?W`#,5LsCp#-i>.r$<$6pD>Lb';9Crc6tgXmKVeU2cD4Eo3R/"
     "2*>]b(MC;$jPfY.;h^`IWM9<Lh2TlS+f-s$o6Q<BWH`YiU.xfLq$N;$0iR/GX:U(jcW2p/W*q?-qmnUCI;jHSAiFWM.R*kU@C=GH?a9wp8f$e.-4^Qg1)Q-GL(lf(r/7GrRgwV%MS=C#"
     "`8ND>Qo#t'X#(v#Y9w0#1D$CIf;W'#pWUPXOuxXuU(H9M(1<q-UE31#^-V'8IRUo7Qf./L>=Ke$$'5F%)]0^#0X@U.a<r:QLtFsLcL6##lOj)#.Y5<-R&KgLwqJfLgN&;Q?gI^#DY2uL"

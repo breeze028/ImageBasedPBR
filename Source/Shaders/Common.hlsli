@@ -17,6 +17,25 @@ float2 Hammersley(uint Idx, uint N)
 	return float2(Idx / (float)N, RadicalInverse_VdC(Idx));
 }
 
+float3 CosineSampleHemisphere(float2 Xi, float3 N)
+{
+	float Phi = 2.0f * PI * Xi.x;
+	float CosTheta = sqrt(1.0f - Xi.y);
+	float SinTheta = sqrt(Xi.y);
+
+	float3 H;
+	H.x = CosTheta * cos(Phi);
+	H.y = CosTheta * sin(Phi);
+	H.z = SinTheta;
+
+	float3 UpVector = abs(N.z) < 0.999f ? float3(0.0f, 0.0f, 1.0f) : float3(1.0f, 0.0f, 0.0f);
+	float3 TangentX = normalize(cross(UpVector, N));
+	float3 TangentY = cross(N, TangentX);
+
+	// Tangent to world space.
+	return TangentX * H.x + TangentY * H.y + N * H.z;
+}
+
 float3 ImportanceSampleGGX(float2 Xi, float Roughness, float3 N)
 {
 	float Alpha = Roughness * Roughness;

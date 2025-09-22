@@ -7,4 +7,5 @@
 *.user
 /Build/.vs
 /Build/x64
+/Build/ImageBasedPBR
 imgui.ini

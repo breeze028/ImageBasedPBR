@@ -30,6 +30,8 @@ struct SALIGN FPerFrameConstantData
 	float4 LightPositions[4];
 	float4 LightColors[4];
 	float4 ViewerPosition;
+	int MaterialMode;
+	int IBLMode;
 };
 
 #ifdef __cplusplus

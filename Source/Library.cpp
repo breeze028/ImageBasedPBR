@@ -109,7 +109,7 @@ void CreateGraphicsContext(HWND Window, bool bShouldCreateDepthBuffer, FGraphics
 		auto ImageDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_D32_FLOAT, Gfx.Resolution[0], Gfx.Resolution[1], 1, 1);
 		ImageDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL | D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE;
 
-		VHR(Gfx.Device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE, &ImageDesc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &CD3DX12_CLEAR_VALUE(DXGI_FORMAT_D32_FLOAT, 1.0f, 0), IID_PPV_ARGS(&Gfx.DepthStencilBuffer)));
+		VHR(Gfx.Device->CreateCommittedResource(get_rvalue_ptr(CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT)), D3D12_HEAP_FLAG_NONE, &ImageDesc, D3D12_RESOURCE_STATE_DEPTH_WRITE, get_rvalue_ptr(CD3DX12_CLEAR_VALUE(DXGI_FORMAT_D32_FLOAT, 1.0f, 0)), IID_PPV_ARGS(&Gfx.DepthStencilBuffer)));
 
 		D3D12_CPU_DESCRIPTOR_HANDLE Handle = AllocateDescriptors(Gfx, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1);
 
@@ -273,9 +273,9 @@ static void CreateHeaps(FGraphicsContext& Gfx)
 			UploadHeap.CPUStart = nullptr;
 			UploadHeap.GPUStart = 0;
 
-			VHR(Gfx.Device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD), D3D12_HEAP_FLAG_NONE, &CD3DX12_RESOURCE_DESC::Buffer(UploadHeap.Capacity), D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&UploadHeap.Heap)));
+			VHR(Gfx.Device->CreateCommittedResource(get_rvalue_ptr(CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD)), D3D12_HEAP_FLAG_NONE, get_rvalue_ptr(CD3DX12_RESOURCE_DESC::Buffer(UploadHeap.Capacity)), D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&UploadHeap.Heap)));
 
-			VHR(UploadHeap.Heap->Map(0, &CD3DX12_RANGE(0, 0), (void**)& UploadHeap.CPUStart));
+			VHR(UploadHeap.Heap->Map(0, get_rvalue_ptr(CD3DX12_RANGE(0, 0)), (void**)& UploadHeap.CPUStart));
 			UploadHeap.GPUStart = UploadHeap.Heap->GetGPUVirtualAddress();
 		}
 	}
@@ -315,7 +315,7 @@ void CreateUIContext(FGraphicsContext& Gfx, uint32_t NumSamples, FUIContext& UI,
 	ImGui::GetIO().Fonts->GetTexDataAsRGBA32(&Pixels, &Width, &Height);
 
 	const auto TextureDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, Width, Height, 1, 1);
-	VHR(Gfx.Device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE, &TextureDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&UI.Font)));
+	VHR(Gfx.Device->CreateCommittedResource(get_rvalue_ptr(CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT)), D3D12_HEAP_FLAG_NONE, &TextureDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&UI.Font)));
 
 	{
 		ID3D12Resource* StagingBuffer = nullptr;
@@ -323,13 +323,13 @@ void CreateUIContext(FGraphicsContext& Gfx, uint32_t NumSamples, FUIContext& UI,
 		Gfx.Device->GetCopyableFootprints(&TextureDesc, 0, 1, 0, nullptr, nullptr, nullptr, &BufferSize);
 
 		const auto BufferDesc = CD3DX12_RESOURCE_DESC::Buffer(BufferSize);
-		VHR(Gfx.Device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD), D3D12_HEAP_FLAG_NONE, &BufferDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&StagingBuffer)));
+		VHR(Gfx.Device->CreateCommittedResource(get_rvalue_ptr(CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD)), D3D12_HEAP_FLAG_NONE, &BufferDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&StagingBuffer)));
 		OutStagingResources.push_back(StagingBuffer);
 
 		D3D12_SUBRESOURCE_DATA TextureData = { Pixels, (LONG_PTR)Width * 4 };
 		UpdateSubresources<1>(Gfx.CmdList, UI.Font, StagingBuffer, 0, 0, 1, &TextureData);
 
-		Gfx.CmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(UI.Font, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+		Gfx.CmdList->ResourceBarrier(1, get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(UI.Font, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)));
 	}
 
 	D3D12_SHADER_RESOURCE_VIEW_DESC SRVDesc = {};
@@ -389,17 +389,6 @@ void DestroyUIContext(FUIContext& UI)
 	}
 }
 
-void UpdateUI(float DeltaTime)
-{
-	ImGuiIO& IO = ImGui::GetIO();
-	IO.KeyCtrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
-	IO.KeyShift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-	IO.KeyAlt = (GetKeyState(VK_MENU) & 0x8000) != 0;
-	IO.DeltaTime = DeltaTime;
-
-	ImGui::NewFrame();
-}
-
 void DrawUI(FGraphicsContext& Gfx, FUIContext& UI)
 {
 	ImGui::Render();
@@ -421,9 +410,9 @@ void DrawUI(FGraphicsContext& Gfx, FUIContext& UI)
 	if (Frame.VertexBufferSize == 0 || Frame.VertexBufferSize < DrawData->TotalVtxCount * sizeof(ImDrawVert))
 	{
 		SAFE_RELEASE(Frame.VertexBuffer);
-		VHR(Gfx.Device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD), D3D12_HEAP_FLAG_NONE, &CD3DX12_RESOURCE_DESC::Buffer(DrawData->TotalVtxCount * sizeof(ImDrawVert)), D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&Frame.VertexBuffer)));
+		VHR(Gfx.Device->CreateCommittedResource(get_rvalue_ptr(CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD)), D3D12_HEAP_FLAG_NONE, get_rvalue_ptr(CD3DX12_RESOURCE_DESC::Buffer(DrawData->TotalVtxCount * sizeof(ImDrawVert))), D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&Frame.VertexBuffer)));
 
-		VHR(Frame.VertexBuffer->Map(0, &CD3DX12_RANGE(0, 0), &Frame.VertexBufferCPUAddress));
+		VHR(Frame.VertexBuffer->Map(0, get_rvalue_ptr(CD3DX12_RANGE(0, 0)), &Frame.VertexBufferCPUAddress));
 
 		Frame.VertexBufferSize = DrawData->TotalVtxCount * sizeof(ImDrawVert);
 
@@ -436,9 +425,9 @@ void DrawUI(FGraphicsContext& Gfx, FUIContext& UI)
 	if (Frame.IndexBufferSize == 0 || Frame.IndexBufferSize < DrawData->TotalIdxCount * sizeof(ImDrawIdx))
 	{
 		SAFE_RELEASE(Frame.IndexBuffer);
-		VHR(Gfx.Device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD), D3D12_HEAP_FLAG_NONE, &CD3DX12_RESOURCE_DESC::Buffer(DrawData->TotalIdxCount * sizeof(ImDrawIdx)), D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&Frame.IndexBuffer)));
+		VHR(Gfx.Device->CreateCommittedResource(get_rvalue_ptr(CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD)), D3D12_HEAP_FLAG_NONE, get_rvalue_ptr(CD3DX12_RESOURCE_DESC::Buffer(DrawData->TotalIdxCount * sizeof(ImDrawIdx))), D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&Frame.IndexBuffer)));
 
-		VHR(Frame.IndexBuffer->Map(0, &CD3DX12_RANGE(0, 0), &Frame.IndexBufferCPUAddress));
+		VHR(Frame.IndexBuffer->Map(0, get_rvalue_ptr(CD3DX12_RANGE(0, 0)), &Frame.IndexBufferCPUAddress));
 
 		Frame.IndexBufferSize = DrawData->TotalIdxCount * sizeof(ImDrawIdx);
 
@@ -473,7 +462,7 @@ void DrawUI(FGraphicsContext& Gfx, FUIContext& UI)
 
 	ID3D12GraphicsCommandList2* CmdList = Gfx.CmdList;
 
-	CmdList->RSSetViewports(1, &CD3DX12_VIEWPORT(0.0f, 0.0f, (float)ViewportWidth, (float)ViewportHeight));
+	CmdList->RSSetViewports(1, get_rvalue_ptr(CD3DX12_VIEWPORT(0.0f, 0.0f, (float)ViewportWidth, (float)ViewportHeight)));
 
 	CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	CmdList->SetPipelineState(UI.PipelineState);
@@ -524,7 +513,7 @@ void CreateMipmapGenerator(FGraphicsContext& Gfx, DXGI_FORMAT Format, FMipmapGen
 		auto TextureDesc = CD3DX12_RESOURCE_DESC::Tex2D(Format, Width, Height, 1, 1);
 		TextureDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
-		VHR(Gfx.Device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE, &TextureDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&OutGenerator.ScratchTextures[Idx])));
+		VHR(Gfx.Device->CreateCommittedResource(get_rvalue_ptr(CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT)), D3D12_HEAP_FLAG_NONE, &TextureDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&OutGenerator.ScratchTextures[Idx])));
 
 		Width /= 2;
 		Height /= 2;
@@ -600,7 +589,7 @@ void GenerateMipmaps(FGraphicsContext& Gfx, FMipmapGenerator& Generator, ID3D12R
 		{
 			const uint32_t NumMipsInDispatch = TotalNumMipsToGen >= 4 ? 4 : TotalNumMipsToGen;
 
-			CmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(Texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
+			CmdList->ResourceBarrier(1, get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(Texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)));
 
 			CmdList->SetComputeRoot32BitConstant(0, CurrentSrcMipLevel, 0);
 			CmdList->SetComputeRoot32BitConstant(0, NumMipsInDispatch, 1);

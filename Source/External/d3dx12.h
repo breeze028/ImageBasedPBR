@@ -12,6 +12,14 @@
 #ifndef __D3DX12_H__
 #define __D3DX12_H__
 
+#include <type_traits>
+
+template <typename T>
+typename std::enable_if<!std::is_lvalue_reference<T>::value, typename std::decay<T>::type*>::type
+get_rvalue_ptr(T&& v) {
+	return &v;
+}
+
 #include "d3d12.h"
 
 #if defined( __cplusplus )

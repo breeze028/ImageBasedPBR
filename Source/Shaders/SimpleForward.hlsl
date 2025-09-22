@@ -1,23 +1,24 @@
 #include "../CPUAndGPUCommon.h"
 #include "Common.hlsli"
 
-#define GRootSignature \
-    "RootFlags(ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT), " \
-    "CBV(b0), " \
-	"DescriptorTable(CBV(b1), SRV(t0), SRV(t1), SRV(t2), visibility = SHADER_VISIBILITY_PIXEL), " \
-	"StaticSampler(" \
-		"s0, " \
-		"filter = FILTER_MIN_MAG_MIP_LINEAR, " \
-		"visibility = SHADER_VISIBILITY_PIXEL, " \
-		"addressU = TEXTURE_ADDRESS_BORDER, " \
-		"addressV = TEXTURE_ADDRESS_BORDER, " \
-		"addressW = TEXTURE_ADDRESS_BORDER)"
+#define GRootSignature                                                                                     \
+	"RootFlags(ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT), "                                                      \
+	"CBV(b0), "                                                                                            \
+	"DescriptorTable(CBV(b1), SRV(t0), SRV(t1), SRV(t2), SRV(t3), visibility = SHADER_VISIBILITY_PIXEL), " \
+	"StaticSampler("                                                                                       \
+	"s0, "                                                                                                 \
+	"filter = FILTER_MIN_MAG_MIP_LINEAR, "                                                                 \
+	"visibility = SHADER_VISIBILITY_PIXEL, "                                                               \
+	"addressU = TEXTURE_ADDRESS_BORDER, "                                                                  \
+	"addressV = TEXTURE_ADDRESS_BORDER, "                                                                  \
+	"addressW = TEXTURE_ADDRESS_BORDER)"
 
 ConstantBuffer<FPerDrawConstantData> GPerDrawCB : register(b0);
 ConstantBuffer<FPerFrameConstantData> GPerFrameCB : register(b1);
 TextureCube GIrradianceMap : register(t0);
 TextureCube GPrefilteredEnvMap : register(t1);
-Texture2D GBRDFIntegrationMap : register(t2);
+TextureCube GEnvMap : register(t2);
+Texture2D GBRDFIntegrationMap : register(t3);
 SamplerState GSampler : register(s0);
 
 // Trowbridge-Reitz GGX normal distribution function.
@@ -41,8 +42,7 @@ float3 FresnelSchlickRoughness(float CosTheta, float3 F0, float Roughness)
 	return F0 + (max(1.0f - Roughness, F0) - F0) * pow(1.0f - CosTheta, 5.0f);
 }
 
-[RootSignature(GRootSignature)]
-void MainVS(
+[RootSignature(GRootSignature)] void MainVS(
 	in float3 InPosition : _Position,
 	in float3 InNormal : _Normal,
 	out float4 OutPosition : SV_Position,
@@ -54,12 +54,11 @@ void MainVS(
 	OutNormalWS = mul(InNormal, (float3x3)GPerDrawCB.ObjectToWorld);
 }
 
-[RootSignature(GRootSignature)]
-void MainPS(
-	in float4 InPosition : SV_Position,
-	in float3 InPositionWS : _Position,
-	in float3 InNormalWS : _Normal,
-	out float4 OutColor : SV_Target0)
+	[RootSignature(GRootSignature)] void MainPS(
+		in float4 InPosition : SV_Position,
+		in float3 InPositionWS : _Position,
+		in float3 InNormalWS : _Normal,
+		out float4 OutColor : SV_Target0)
 {
 	float3 V = normalize(GPerFrameCB.ViewerPosition.xyz - InPositionWS);
 	float3 N = normalize(InNormalWS);
@@ -74,7 +73,8 @@ void MainPS(
 	F0 = lerp(F0, Albedo, Metallic);
 
 	float3 Lo = 0.0f;
-	for (int LightIdx = 0; LightIdx < 4; ++LightIdx)
+	// We manually disable point lights, only use image based lighting.
+	for (int LightIdx = 0; LightIdx < 0; ++LightIdx)
 	{
 		float3 LightVector = GPerFrameCB.LightPositions[LightIdx].xyz - InPositionWS;
 
@@ -107,15 +107,80 @@ void MainPS(
 	float3 KD = 1.0f - F;
 	KD *= 1.0f - Metallic;
 
-	float3 Irradiance = GIrradianceMap.SampleLevel(GSampler, N, 0.0f).rgb;
-	float3 Diffuse = Irradiance * Albedo;
-	float3 PrefilteredColor = GPrefilteredEnvMap.SampleLevel(GSampler, R, Roughness * 5.0f).rgb;
+	float3 Diffuse = 0.0f;
+	float3 Specular = 0.0f;
+	if (GPerFrameCB.IBLMode == 0)
+	{
+		// Split Sum Approximation
+		float3 Irradiance = GIrradianceMap.SampleLevel(GSampler, N, 0.0f).rgb;
+		Diffuse = Irradiance * Albedo;
 
-	float2 EnvBRDF = GBRDFIntegrationMap.SampleLevel(GSampler, float2(min(NoV, 0.999f), Roughness), 0.0f).rg;
+		float3 PrefilteredColor = GPrefilteredEnvMap.SampleLevel(GSampler, R, Roughness * 5.0f).rgb;
+		float2 EnvBRDF = GBRDFIntegrationMap.SampleLevel(GSampler, float2(min(NoV, 0.999f), Roughness), 0.0f).rg;
+		Specular = PrefilteredColor * (F * EnvBRDF.x + EnvBRDF.y);
+	}
+	else if (GPerFrameCB.IBLMode == 1)
+	{
+		// Spherical Harmonics Exponential (Specular only)
+	}
+	else if (GPerFrameCB.IBLMode == 2)
+	{
+		// Reference
+		const uint NumSamples = 512;
+		float3 Irradiance = 0.0f;
 
-	float3 Specular = PrefilteredColor * (F * EnvBRDF.x + EnvBRDF.y);
+		for (uint SampleIdx = 0; SampleIdx < NumSamples; ++SampleIdx)
+		{
+			float2 Xi = Hammersley(SampleIdx, NumSamples);
+			float3 L = CosineSampleHemisphere(Xi, N);
 
-	float3 Ambient = (KD * Diffuse + Specular) * AO;
+			float NoL = saturate(dot(N, L));
+			if (NoL > 0.0f)
+			{
+				Irradiance += GEnvMap.SampleLevel(GSampler, L, 0).rgb;
+			}
+		}
+
+		for (uint SampleIdx = 0; SampleIdx < NumSamples; ++SampleIdx)
+		{
+			float2 Xi = Hammersley(SampleIdx, NumSamples);
+			float3 H = ImportanceSampleGGX(Xi, Roughness, N);
+			float3 L = normalize(2.0f * dot(V, H) * H - V);
+
+			float NoL = saturate(dot(N, L));
+			float NoH = saturate(dot(N, H));
+			float VoH = saturate(dot(V, H));
+
+			if (NoL > 0.0f)
+			{
+				float3 Li = GEnvMap.SampleLevel(GSampler, L, 0).rgb;
+				float G = GeometrySmith(NoL, NoV, Roughness);
+				float G_Vis = G * VoH / (NoH * NoV);
+				Specular += Li * F * G_Vis * NoL;
+			}
+		}
+
+		Diffuse = (Irradiance * Albedo) * (1.0f / NumSamples);
+		Specular *= (1.0f / NumSamples);
+	}
+
+	float3 Ambient = 0.0f;
+	if (GPerFrameCB.MaterialMode == 0)
+	{
+		// Diffuse + Specular
+		Ambient = KD * Diffuse + Specular;
+	}
+	else if (GPerFrameCB.MaterialMode == 1)
+	{
+		// Diffuse only
+		Ambient = KD * Diffuse;
+	}
+	else if (GPerFrameCB.MaterialMode == 2)
+	{
+		// Specular only
+		Ambient = Specular;
+	}
+	Ambient *= AO;
 
 	float3 Color = Ambient + Lo;
 	Color = Color / (Color + 1.0f);

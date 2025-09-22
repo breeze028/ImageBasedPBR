@@ -83,23 +83,53 @@ struct FDemoRoot
 	ID3D12Resource* MSDepthBuffer;
 	D3D12_CPU_DESCRIPTOR_HANDLE MSColorBufferRTV;
 	D3D12_CPU_DESCRIPTOR_HANDLE MSDepthBufferDSV;
+	int MaterialMode;
+	int IBLMode;
 };
+
+static void UpdateUI(FDemoRoot& Root, float DeltaTime)
+{
+	ImGuiIO& IO = ImGui::GetIO();
+	IO.KeyCtrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+	IO.KeyShift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+	IO.KeyAlt = (GetKeyState(VK_MENU) & 0x8000) != 0;
+	IO.DeltaTime = DeltaTime;
+
+	ImGui::NewFrame();
+
+	// Our Custom UI Window
+	ImGui::Begin("Image Based Lighting");
+
+	{
+		ImGui::Text("Material Mode");
+		const char* items[] = { "Diffuse + Specular", "Diffuse Only", "Specular Only" };
+		ImGui::Combo("##MaterialMode", &(Root.MaterialMode), items, IM_ARRAYSIZE(items));
+	}
+
+	{
+		ImGui::Text("IBL Mode");
+		const char* items[] = { "Split Sum Approximation", "Spherical Harmonics Exponential (Specular Only)", "Reference" };
+		ImGui::Combo("##IBLMode", &(Root.IBLMode), items, IM_ARRAYSIZE(items));
+	}
+
+	ImGui::End();
+}
 
 static void Update(FDemoRoot& Root)
 {
 	double Time;
 	float DeltaTime;
 	UpdateFrameStats(Root.Gfx.Window, "ImageBasedPBR", Time, DeltaTime);
-	UpdateUI(DeltaTime);
+	UpdateUI(Root, DeltaTime);
 
 	// Update camera position.
-	{
-		const float Angle = XMScalarModAngle(0.25f * (float)Time);
-		XMVECTOR Position = XMVectorSet(12.0f * cosf(Angle), 6.0f, 12.0f * sinf(Angle), 1.0f);
-		XMStoreFloat3(&Root.CameraPosition, Position);
-	}
+	//{
+	//	const float Angle = XMScalarModAngle(0.25f * (float)Time);
+	//	XMVECTOR Position = XMVectorSet(12.0f * cosf(Angle), 6.0f, 12.0f * sinf(Angle), 1.0f);
+	//	XMStoreFloat3(&Root.CameraPosition, Position);
+	//}
 
-	ImGui::ShowDemoWindow();
+	//ImGui::ShowDemoWindow();
 }
 
 static void Draw(FDemoRoot& Root)
@@ -107,8 +137,8 @@ static void Draw(FDemoRoot& Root)
 	FGraphicsContext& Gfx = Root.Gfx;
 	ID3D12GraphicsCommandList2* CmdList = GetAndInitCommandList(Gfx);
 
-	CmdList->RSSetViewports(1, &CD3DX12_VIEWPORT(0.0f, 0.0f, (float)Gfx.Resolution[0], (float)Gfx.Resolution[1]));
-	CmdList->RSSetScissorRects(1, &CD3DX12_RECT(0, 0, (LONG)Gfx.Resolution[0], (LONG)Gfx.Resolution[1]));
+	CmdList->RSSetViewports(1, get_rvalue_ptr(CD3DX12_VIEWPORT(0.0f, 0.0f, (float)Gfx.Resolution[0], (float)Gfx.Resolution[1])));
+	CmdList->RSSetScissorRects(1, get_rvalue_ptr(CD3DX12_RECT(0, 0, (LONG)Gfx.Resolution[0], (LONG)Gfx.Resolution[1])));
 
 	CmdList->OMSetRenderTargets(1, &Root.MSColorBufferRTV, TRUE, &Root.MSDepthBufferDSV);
 	CmdList->ClearRenderTargetView(Root.MSColorBufferRTV, XMVECTORF32{ 0.0f }, 0, nullptr);
@@ -144,9 +174,12 @@ static void Draw(FDemoRoot& Root)
 			const XMFLOAT3 P = Root.CameraPosition;
 			CPUAddress->ViewerPosition = XMFLOAT4(P.x, P.y, P.z, 1.0f);
 
+			CPUAddress->MaterialMode = Root.MaterialMode;
+			CPUAddress->IBLMode = Root.IBLMode;
+
 			CD3DX12_CPU_DESCRIPTOR_HANDLE TableBaseCPU;
 			CD3DX12_GPU_DESCRIPTOR_HANDLE TableBaseGPU;
-			AllocateGPUDescriptors(Gfx, 4, TableBaseCPU, TableBaseGPU);
+			AllocateGPUDescriptors(Gfx, 5, TableBaseCPU, TableBaseGPU);
 
 			D3D12_CONSTANT_BUFFER_VIEW_DESC CBVDesc = {};
 			CBVDesc.BufferLocation = GPUAddress;
@@ -159,6 +192,9 @@ static void Draw(FDemoRoot& Root)
 			TableBaseCPU.Offset(Gfx.DescriptorSize);
 
 			Gfx.Device->CopyDescriptorsSimple(1, TableBaseCPU, Root.PrefilteredEnvMapSRV, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+			TableBaseCPU.Offset(Gfx.DescriptorSize);
+
+			Gfx.Device->CopyDescriptorsSimple(1, TableBaseCPU, Root.EnvMapSRV, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 			TableBaseCPU.Offset(Gfx.DescriptorSize);
 
 			Gfx.Device->CopyDescriptorsSimple(1, TableBaseCPU, Root.BRDFIntegrationMapSRV, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -400,7 +436,7 @@ static void CreateEnvMap(FGraphicsContext& Gfx, const FStaticMesh& Cube, ID3D12R
 	D3D12_CPU_DESCRIPTOR_HANDLE TempHDRRectTextureSRV = AllocateDescriptors(Gfx, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1);
 	{
 		const auto Desc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32G32B32_FLOAT, Width, Height, 1, 1);
-		VHR(Gfx.Device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&TempHDRRectTexture)));
+		VHR(Gfx.Device->CreateCommittedResource(get_rvalue_ptr(CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT)), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&TempHDRRectTexture)));
 		OutTempResources.push_back(TempHDRRectTexture);
 
 		Gfx.Device->CreateShaderResourceView(TempHDRRectTexture, nullptr, TempHDRRectTextureSRV);
@@ -409,7 +445,7 @@ static void CreateEnvMap(FGraphicsContext& Gfx, const FStaticMesh& Cube, ID3D12R
 	ID3D12Resource* StagingBuffer;
 	{
 		const auto BufferDesc = CD3DX12_RESOURCE_DESC::Buffer(GetRequiredIntermediateSize(TempHDRRectTexture, 0, 1));
-		VHR(Gfx.Device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD), D3D12_HEAP_FLAG_NONE, &BufferDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&StagingBuffer)));
+		VHR(Gfx.Device->CreateCommittedResource(get_rvalue_ptr(CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD)), D3D12_HEAP_FLAG_NONE, &BufferDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&StagingBuffer)));
 		OutTempResources.push_back(StagingBuffer);
 	}
 
@@ -418,7 +454,7 @@ static void CreateEnvMap(FGraphicsContext& Gfx, const FStaticMesh& Cube, ID3D12R
 	const D3D12_CPU_DESCRIPTOR_HANDLE TempCubeMapRTVs = AllocateDescriptors(Gfx, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 6);
 	{
 		auto Desc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R16G16B16A16_FLOAT, CubeMapResolution, CubeMapResolution, 6);
-		VHR(Gfx.Device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&OutEnvMap)));
+		VHR(Gfx.Device->CreateCommittedResource(get_rvalue_ptr(CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT)), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&OutEnvMap)));
 
 		OutEnvMapSRV = AllocateDescriptors(Gfx, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1);
 
@@ -430,7 +466,7 @@ static void CreateEnvMap(FGraphicsContext& Gfx, const FStaticMesh& Cube, ID3D12R
 
 
 		Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-		VHR(Gfx.Device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_RENDER_TARGET, nullptr, IID_PPV_ARGS(&TempCubeMap)));
+		VHR(Gfx.Device->CreateCommittedResource(get_rvalue_ptr(CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT)), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_RENDER_TARGET, nullptr, IID_PPV_ARGS(&TempCubeMap)));
 		OutTempResources.push_back(TempCubeMap);
 
 		D3D12_CPU_DESCRIPTOR_HANDLE CPUHandle = TempCubeMapRTVs;
@@ -453,11 +489,11 @@ static void CreateEnvMap(FGraphicsContext& Gfx, const FStaticMesh& Cube, ID3D12R
 
 	stbi_image_free((void*)ImageData.pData);
 
-	CmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(TempHDRRectTexture, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+	CmdList->ResourceBarrier(1, get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(TempHDRRectTexture, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)));
 
 
-	CmdList->RSSetViewports(1, &CD3DX12_VIEWPORT(0.0f, 0.0f, (float)CubeMapResolution, (float)CubeMapResolution));
-	CmdList->RSSetScissorRects(1, &CD3DX12_RECT(0, 0, CubeMapResolution, CubeMapResolution));
+	CmdList->RSSetViewports(1, get_rvalue_ptr(CD3DX12_VIEWPORT(0.0f, 0.0f, (float)CubeMapResolution, (float)CubeMapResolution)));
+	CmdList->RSSetScissorRects(1, get_rvalue_ptr(CD3DX12_RECT(0, 0, CubeMapResolution, CubeMapResolution)));
 
 	CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
@@ -495,11 +531,11 @@ static void CreateEnvMap(FGraphicsContext& Gfx, const FStaticMesh& Cube, ID3D12R
 		CPUAddress++;
 	}
 
-	CmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(TempCubeMap, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE));
+	CmdList->ResourceBarrier(1, get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(TempCubeMap, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE)));
 
 	CmdList->CopyResource(OutEnvMap, TempCubeMap);
 
-	Gfx.CmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(OutEnvMap, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+	Gfx.CmdList->ResourceBarrier(1, get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(OutEnvMap, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)));
 }
 
 static void CreateIrradianceMap(FGraphicsContext& Gfx, D3D12_CPU_DESCRIPTOR_HANDLE EnvMapSRV, const FStaticMesh& Cube, ID3D12Resource*& OutIrradianceMap, D3D12_CPU_DESCRIPTOR_HANDLE& OutIrradianceMapSRV, eastl::vector<ID3D12Resource*>& OutTempResources)
@@ -509,7 +545,7 @@ static void CreateIrradianceMap(FGraphicsContext& Gfx, D3D12_CPU_DESCRIPTOR_HAND
 	const D3D12_CPU_DESCRIPTOR_HANDLE TempCubeMapRTVs = AllocateDescriptors(Gfx, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 6);
 	{
 		auto Desc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R16G16B16A16_FLOAT, CubeMapResolution, CubeMapResolution, 6);
-		VHR(Gfx.Device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&OutIrradianceMap)));
+		VHR(Gfx.Device->CreateCommittedResource(get_rvalue_ptr(CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT)), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&OutIrradianceMap)));
 
 		OutIrradianceMapSRV = AllocateDescriptors(Gfx, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1);
 
@@ -521,7 +557,7 @@ static void CreateIrradianceMap(FGraphicsContext& Gfx, D3D12_CPU_DESCRIPTOR_HAND
 
 
 		Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-		VHR(Gfx.Device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_RENDER_TARGET, nullptr, IID_PPV_ARGS(&TempCubeMap)));
+		VHR(Gfx.Device->CreateCommittedResource(get_rvalue_ptr(CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT)), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_RENDER_TARGET, nullptr, IID_PPV_ARGS(&TempCubeMap)));
 		OutTempResources.push_back(TempCubeMap);
 
 		D3D12_CPU_DESCRIPTOR_HANDLE CPUHandle = TempCubeMapRTVs;
@@ -540,8 +576,8 @@ static void CreateIrradianceMap(FGraphicsContext& Gfx, D3D12_CPU_DESCRIPTOR_HAND
 
 	ID3D12GraphicsCommandList2* CmdList = Gfx.CmdList;
 
-	CmdList->RSSetViewports(1, &CD3DX12_VIEWPORT(0.0f, 0.0f, (float)CubeMapResolution, (float)CubeMapResolution));
-	CmdList->RSSetScissorRects(1, &CD3DX12_RECT(0, 0, CubeMapResolution, CubeMapResolution));
+	CmdList->RSSetViewports(1, get_rvalue_ptr(CD3DX12_VIEWPORT(0.0f, 0.0f, (float)CubeMapResolution, (float)CubeMapResolution)));
+	CmdList->RSSetScissorRects(1, get_rvalue_ptr(CD3DX12_RECT(0, 0, CubeMapResolution, CubeMapResolution)));
 
 	CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
@@ -579,11 +615,11 @@ static void CreateIrradianceMap(FGraphicsContext& Gfx, D3D12_CPU_DESCRIPTOR_HAND
 		CPUAddress++;
 	}
 
-	CmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(TempCubeMap, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE));
+	CmdList->ResourceBarrier(1, get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(TempCubeMap, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE)));
 
 	CmdList->CopyResource(OutIrradianceMap, TempCubeMap);
 
-	Gfx.CmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(OutIrradianceMap, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+	Gfx.CmdList->ResourceBarrier(1, get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(OutIrradianceMap, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)));
 }
 
 static void CreatePrefilteredEnvMap(FGraphicsContext& Gfx, D3D12_CPU_DESCRIPTOR_HANDLE EnvMapSRV, const FStaticMesh& Cube, ID3D12Resource*& OutPrefilteredEnvMap, D3D12_CPU_DESCRIPTOR_HANDLE& OutPrefilteredEnvMapSRV, eastl::vector<ID3D12Resource*>& OutTempResources)
@@ -595,7 +631,7 @@ static void CreatePrefilteredEnvMap(FGraphicsContext& Gfx, D3D12_CPU_DESCRIPTOR_
 	const D3D12_CPU_DESCRIPTOR_HANDLE TempCubeMapRTVs = AllocateDescriptors(Gfx, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 6 * NumMipLevelsUsed);
 	{
 		auto Desc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R16G16B16A16_FLOAT, CubeMapResolution, CubeMapResolution, 6, NumMipLevelsUsed);
-		VHR(Gfx.Device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&OutPrefilteredEnvMap)));
+		VHR(Gfx.Device->CreateCommittedResource(get_rvalue_ptr(CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT)), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&OutPrefilteredEnvMap)));
 
 		OutPrefilteredEnvMapSRV = AllocateDescriptors(Gfx, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1);
 
@@ -607,7 +643,7 @@ static void CreatePrefilteredEnvMap(FGraphicsContext& Gfx, D3D12_CPU_DESCRIPTOR_
 
 
 		Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-		VHR(Gfx.Device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_RENDER_TARGET, nullptr, IID_PPV_ARGS(&TempCubeMap)));
+		VHR(Gfx.Device->CreateCommittedResource(get_rvalue_ptr(CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT)), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_RENDER_TARGET, nullptr, IID_PPV_ARGS(&TempCubeMap)));
 		OutTempResources.push_back(TempCubeMap);
 
 		D3D12_CPU_DESCRIPTOR_HANDLE CPUHandle = TempCubeMapRTVs;
@@ -651,8 +687,8 @@ static void CreatePrefilteredEnvMap(FGraphicsContext& Gfx, D3D12_CPU_DESCRIPTOR_
 
 	for (uint32_t MipSliceIdx = 0; MipSliceIdx < NumMipLevelsUsed; ++MipSliceIdx)
 	{
-		CmdList->RSSetViewports(1, &CD3DX12_VIEWPORT(0.0f, 0.0f, (float)CurrentResolution, (float)CurrentResolution));
-		CmdList->RSSetScissorRects(1, &CD3DX12_RECT(0, 0, CurrentResolution, CurrentResolution));
+		CmdList->RSSetViewports(1, get_rvalue_ptr(CD3DX12_VIEWPORT(0.0f, 0.0f, (float)CurrentResolution, (float)CurrentResolution)));
+		CmdList->RSSetScissorRects(1, get_rvalue_ptr(CD3DX12_RECT(0, 0, CurrentResolution, CurrentResolution)));
 
 		for (uint32_t ArraySliceIdx = 0; ArraySliceIdx < 6; ++ArraySliceIdx)
 		{
@@ -674,11 +710,11 @@ static void CreatePrefilteredEnvMap(FGraphicsContext& Gfx, D3D12_CPU_DESCRIPTOR_
 		CurrentResolution /= 2;
 	}
 
-	CmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(TempCubeMap, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE));
+	CmdList->ResourceBarrier(1, get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(TempCubeMap, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE)));
 
 	CmdList->CopyResource(OutPrefilteredEnvMap, TempCubeMap);
 
-	Gfx.CmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(OutPrefilteredEnvMap, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+	Gfx.CmdList->ResourceBarrier(1, get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(OutPrefilteredEnvMap, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)));
 }
 
 static void CreateBRDFIntegrationMap(FGraphicsContext& Gfx, ID3D12Resource*& OutBRDFIntegrationMap, D3D12_CPU_DESCRIPTOR_HANDLE& OutBRDFIntegrationMapSRV, eastl::vector<ID3D12Resource*>& OutTempResources)
@@ -690,7 +726,7 @@ static void CreateBRDFIntegrationMap(FGraphicsContext& Gfx, ID3D12Resource*& Out
 	const D3D12_CPU_DESCRIPTOR_HANDLE TempTextureUAV = AllocateDescriptors(Gfx, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1);
 	{
 		auto Desc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R16G16_FLOAT, MapResolution, MapResolution, 1, 1);
-		VHR(Gfx.Device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&OutBRDFIntegrationMap)));
+		VHR(Gfx.Device->CreateCommittedResource(get_rvalue_ptr(CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT)), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&OutBRDFIntegrationMap)));
 
 		OutBRDFIntegrationMapSRV = AllocateDescriptors(Gfx, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1);
 
@@ -698,7 +734,7 @@ static void CreateBRDFIntegrationMap(FGraphicsContext& Gfx, ID3D12Resource*& Out
 
 
 		Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-		VHR(Gfx.Device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&TempTexture)));
+		VHR(Gfx.Device->CreateCommittedResource(get_rvalue_ptr(CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT)), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&TempTexture)));
 		OutTempResources.push_back(TempTexture);
 
 		Gfx.Device->CreateUnorderedAccessView(TempTexture, nullptr, nullptr, TempTextureUAV);
@@ -711,11 +747,11 @@ static void CreateBRDFIntegrationMap(FGraphicsContext& Gfx, ID3D12Resource*& Out
 	CmdList->Dispatch(MapResolution / 8, MapResolution / 8, 1);
 
 
-	CmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(TempTexture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE));
+	CmdList->ResourceBarrier(1, get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(TempTexture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE)));
 
 	CmdList->CopyResource(OutBRDFIntegrationMap, TempTexture);
 
-	Gfx.CmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(OutBRDFIntegrationMap, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+	Gfx.CmdList->ResourceBarrier(1, get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(OutBRDFIntegrationMap, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)));
 }
 
 static void LoadGLTFMesh(const char* FileName, FMesh& OutMesh, eastl::vector<FVertex>& InOutVertices, eastl::vector<uint32_t>& InOutIndices)
@@ -901,22 +937,22 @@ static void Initialize(FDemoRoot& Root)
 		const D3D12_RESOURCE_DESC Desc = CD3DX12_RESOURCE_DESC::Buffer(AllVertices.size() * sizeof(FVertex));
 
 		ID3D12Resource* StagingVB;
-		VHR(Gfx.Device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&StagingVB)));
+		VHR(Gfx.Device->CreateCommittedResource(get_rvalue_ptr(CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD)), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&StagingVB)));
 		TempResources.push_back(StagingVB);
 
 		void* Ptr;
-		VHR(StagingVB->Map(0, &CD3DX12_RANGE(0, 0), &Ptr));
+		VHR(StagingVB->Map(0, get_rvalue_ptr(CD3DX12_RANGE(0, 0)), &Ptr));
 		memcpy(Ptr, AllVertices.data(), AllVertices.size() * sizeof(FVertex));
 		StagingVB->Unmap(0, nullptr);
 
-		VHR(Gfx.Device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&Root.StaticVB)));
+		VHR(Gfx.Device->CreateCommittedResource(get_rvalue_ptr(CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT)), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&Root.StaticVB)));
 
 		Root.StaticVBView.BufferLocation = Root.StaticVB->GetGPUVirtualAddress();
 		Root.StaticVBView.StrideInBytes = sizeof(FVertex);
 		Root.StaticVBView.SizeInBytes = (UINT)AllVertices.size() * sizeof(FVertex);
 
 		Gfx.CmdList->CopyResource(Root.StaticVB, StagingVB);
-		Gfx.CmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(Root.StaticVB, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER));
+		Gfx.CmdList->ResourceBarrier(1, get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(Root.StaticVB, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER)));
 	}
 
 	// Static geometry index buffer (single buffer for all static meshes).
@@ -924,22 +960,22 @@ static void Initialize(FDemoRoot& Root)
 		const D3D12_RESOURCE_DESC Desc = CD3DX12_RESOURCE_DESC::Buffer(AllIndices.size() * sizeof(uint32_t));
 
 		ID3D12Resource* StagingIB;
-		VHR(Gfx.Device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&StagingIB)));
+		VHR(Gfx.Device->CreateCommittedResource(get_rvalue_ptr(CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD)), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&StagingIB)));
 		TempResources.push_back(StagingIB);
 
 		void* Ptr;
-		VHR(StagingIB->Map(0, &CD3DX12_RANGE(0, 0), &Ptr));
+		VHR(StagingIB->Map(0, get_rvalue_ptr(CD3DX12_RANGE(0, 0)), &Ptr));
 		memcpy(Ptr, AllIndices.data(), AllIndices.size() * sizeof(uint32_t));
 		StagingIB->Unmap(0, nullptr);
 
-		VHR(Gfx.Device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&Root.StaticIB)));
+		VHR(Gfx.Device->CreateCommittedResource(get_rvalue_ptr(CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT)), D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&Root.StaticIB)));
 
 		Root.StaticIBView.BufferLocation = Root.StaticIB->GetGPUVirtualAddress();
 		Root.StaticIBView.Format = DXGI_FORMAT_R32_UINT;
 		Root.StaticIBView.SizeInBytes = (UINT)AllIndices.size() * sizeof(uint32_t);
 
 		Gfx.CmdList->CopyResource(Root.StaticIB, StagingIB);
-		Gfx.CmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(Root.StaticIB, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_INDEX_BUFFER));
+		Gfx.CmdList->ResourceBarrier(1, get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(Root.StaticIB, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_INDEX_BUFFER)));
 	}
 
 	Gfx.CmdList->IASetVertexBuffers(0, 1, &Root.StaticVBView);
@@ -970,11 +1006,11 @@ static void Initialize(FDemoRoot& Root)
 	{
 		CD3DX12_RESOURCE_DESC DescColor = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, Gfx.Resolution[0], Gfx.Resolution[1], 1, 1, NumSamples);
 		DescColor.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-		VHR(Gfx.Device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE, &DescColor, D3D12_RESOURCE_STATE_RENDER_TARGET, &CD3DX12_CLEAR_VALUE(DXGI_FORMAT_R8G8B8A8_UNORM, XMVECTORF32{ 0.0f }), IID_PPV_ARGS(&Root.MSColorBuffer)));
+		VHR(Gfx.Device->CreateCommittedResource(get_rvalue_ptr(CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT)), D3D12_HEAP_FLAG_NONE, &DescColor, D3D12_RESOURCE_STATE_RENDER_TARGET, get_rvalue_ptr(CD3DX12_CLEAR_VALUE(DXGI_FORMAT_R8G8B8A8_UNORM, XMVECTORF32{ 0.0f })), IID_PPV_ARGS(&Root.MSColorBuffer)));
 
 		CD3DX12_RESOURCE_DESC DescDepth = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_D32_FLOAT, Gfx.Resolution[0], Gfx.Resolution[1], 1, 1, NumSamples);
 		DescDepth.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
-		VHR(Gfx.Device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE, &DescDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE, &CD3DX12_CLEAR_VALUE(DXGI_FORMAT_D32_FLOAT, 1.0f, 0), IID_PPV_ARGS(&Root.MSDepthBuffer)));
+		VHR(Gfx.Device->CreateCommittedResource(get_rvalue_ptr(CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT)), D3D12_HEAP_FLAG_NONE, &DescDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE, get_rvalue_ptr(CD3DX12_CLEAR_VALUE(DXGI_FORMAT_D32_FLOAT, 1.0f, 0)), IID_PPV_ARGS(&Root.MSDepthBuffer)));
 
 		Root.MSColorBufferRTV = AllocateDescriptors(Gfx, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 1);
 		Root.MSDepthBufferDSV = AllocateDescriptors(Gfx, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1);
@@ -1020,7 +1056,8 @@ static void Initialize(FDemoRoot& Root)
 		}
 	}
 
-	Root.CameraPosition = XMFLOAT3(0.0f, 0.0f, -10.0f);
+	//Root.CameraPosition = XMFLOAT3(0.0f, 0.0f, -10.0f);
+	Root.CameraPosition = XMFLOAT3(0.0f, 0.0f, 12.0f);
 	Root.CameraFocusPosition = XMFLOAT3(0.0f, 0.0f, 0.0f);
 }
 

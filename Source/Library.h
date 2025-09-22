@@ -94,7 +94,6 @@ void WaitForGPU(FGraphicsContext& Gfx);
 
 void CreateUIContext(FGraphicsContext& Gfx, uint32_t NumSamples, FUIContext& UI, eastl::vector<ID3D12Resource*>& OutStagingResources);
 void DestroyUIContext(FUIContext& UI);
-void UpdateUI(float DeltaTime);
 void DrawUI(FGraphicsContext& Gfx, FUIContext& UI);
 
 eastl::vector<uint8_t> LoadFile(const char* Name);

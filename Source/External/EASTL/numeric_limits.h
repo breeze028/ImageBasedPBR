@@ -37,6 +37,7 @@
 #include <EASTL/type_traits.h>
 #include <limits.h>                 // C limits.h header
 #include <float.h>
+#include <limits>
 #if defined(_CPPLIB_VER)            // Dinkumware.
 	#include <ymath.h>
 #endif
@@ -1435,16 +1436,28 @@ namespace eastl
 				{ return 0.5f; }
 
 			static value_type infinity() 
-				{ return _CSTD _FInf._Float; }
+				//{ return _CSTD _FInf._Float; }
+			{ 
+				return std::numeric_limits<float>::infinity();
+			}
 
 			static value_type quiet_NaN() 
-				{ return _CSTD _FNan._Float; }
+				//{ return _CSTD _FNan._Float; }
+			{
+				return std::numeric_limits<float>::quiet_NaN();
+			}
 
 			static value_type signaling_NaN()
-				{ return _CSTD _FSnan._Float; } 
+				//{ return _CSTD _FSnan._Float; } 
+			{
+				return std::numeric_limits<float>::signaling_NaN();
+			}
 
-			static value_type denorm_min() 
-				{ return _CSTD _FDenorm._Float; }
+			static value_type denorm_min()
+				//{ return _CSTD _FDenorm._Float; }
+			{
+				return std::numeric_limits<float>::denorm_min();
+			}
 
 		#endif
 	};
@@ -1553,16 +1566,29 @@ namespace eastl
 				{ return 0.5f; }
 
 			static value_type infinity() 
-				{ return _CSTD _Inf._Double; }
+				//{ return _CSTD _Inf._Double; }
+			{
+				return std::numeric_limits<double>::infinity();
+			}
 
 			static value_type quiet_NaN() 
-				{ return _CSTD _Nan._Double; }
+				//{ return _CSTD _Nan._Double; }
+			{
+				return std::numeric_limits<double>::quiet_NaN();
+			}
 
 			static value_type signaling_NaN()
-				{ return _CSTD _Snan._Double; } 
+				//{ return _CSTD _Snan._Double; }
+			{
+				return std::numeric_limits<double>::signaling_NaN();
+			}
 
 			static value_type denorm_min() 
-				{ return _CSTD _Denorm._Double; }
+				//{ return _CSTD _Denorm._Double; }
+			{
+				return std::numeric_limits<double>::denorm_min();
+			}
+
 
 		#endif
 	};
@@ -1671,16 +1697,28 @@ namespace eastl
 				{ return 0.5f; }
 
 			static value_type infinity() 
-				{ return _CSTD _LInf._Long_double; }
+				//{ return _CSTD _LInf._Long_double; }
+			{
+				return std::numeric_limits<long double>::infinity();
+			}
 
 			static value_type quiet_NaN() 
-				{ return _CSTD _LNan._Long_double; }
+				//{ return _CSTD _LNan._Long_double; }
+			{
+				return std::numeric_limits<long double>::quiet_NaN();
+			}
 
 			static value_type signaling_NaN()
-				{ return _CSTD _LSnan._Long_double; } 
+				//{ return _CSTD _LSnan._Long_double; } 
+			{
+				return std::numeric_limits<long double>::signaling_NaN();
+			}
 
-			static value_type denorm_min() 
-				{ return _CSTD _LDenorm._Long_double; }
+			static value_type denorm_min()
+				//{ return _CSTD _LDenorm._Long_double; }
+			{
+				return std::numeric_limits<long double>::denorm_min();
+			}
 
 		#endif
 	};

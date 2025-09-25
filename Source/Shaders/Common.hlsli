@@ -17,6 +17,29 @@ float2 Hammersley(uint Idx, uint N)
 	return float2(Idx / (float)N, RadicalInverse_VdC(Idx));
 }
 
+float HaltonSequence(uint Index, uint Base)
+{
+    float F = 1.0;
+    float Result = 0.0;
+    
+    uint I = Index;
+    while (I > 0)
+    {
+        F /= Base; 
+        Result += F * (I % Base);
+        I = I / Base;                
+    }
+    
+    return Result;
+}
+
+float2 HaltonSequence2D(uint Index)
+{
+    float X = HaltonSequence(Index, 2);
+    float Y = HaltonSequence(Index, 3);
+    return float2(X, Y);
+}
+
 float3 CosineSampleHemisphere(float2 Xi, float3 N)
 {
 	float Phi = 2.0f * PI * Xi.x;

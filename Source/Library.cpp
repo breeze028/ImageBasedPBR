@@ -655,7 +655,7 @@ eastl::vector<uint8_t> LoadFile(const char* Name)
 	return Content;
 }
 
-void UpdateFrameStats(HWND Window, const char* Name, double& OutTime, float& OutDeltaTime)
+void UpdateFrameStats(HWND Window, const char* Name, double& OutTime, float& OutDeltaTime, uint32_t& OutNumFrames)
 {
 	static double PreviousTime = -1.0;
 	static double HeaderRefreshTime = 0.0;
@@ -682,6 +682,8 @@ void UpdateFrameStats(HWND Window, const char* Name, double& OutTime, float& Out
 		FrameCount = 0;
 	}
 	FrameCount++;
+
+	OutNumFrames++;
 }
 
 double GetTime()

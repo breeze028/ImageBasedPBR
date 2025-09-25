@@ -79,12 +79,18 @@ struct FDemoRoot
 	D3D12_CPU_DESCRIPTOR_HANDLE IrradianceMapSRV;
 	D3D12_CPU_DESCRIPTOR_HANDLE PrefilteredEnvMapSRV;
 	D3D12_CPU_DESCRIPTOR_HANDLE BRDFIntegrationMapSRV;
+	D3D12_CPU_DESCRIPTOR_HANDLE AccumulationBufferSRV;
 	ID3D12Resource* MSColorBuffer;
 	ID3D12Resource* MSDepthBuffer;
+	ID3D12Resource* AccumulationBuffer;
 	D3D12_CPU_DESCRIPTOR_HANDLE MSColorBufferRTV;
 	D3D12_CPU_DESCRIPTOR_HANDLE MSDepthBufferDSV;
+	int LastMaterialMode;
+	int LastIBLMode;
 	int MaterialMode;
 	int IBLMode;
+	uint32_t NumFrames;
+	bool bUseProgressiveRendering;
 };
 
 static void UpdateUI(FDemoRoot& Root, float DeltaTime)
@@ -101,15 +107,24 @@ static void UpdateUI(FDemoRoot& Root, float DeltaTime)
 	ImGui::Begin("Image Based Lighting");
 
 	{
+		Root.LastMaterialMode = Root.MaterialMode;
 		ImGui::Text("Material Mode");
 		const char* items[] = { "Diffuse + Specular", "Diffuse Only", "Specular Only" };
 		ImGui::Combo("##MaterialMode", &(Root.MaterialMode), items, IM_ARRAYSIZE(items));
 	}
 
 	{
+		Root.LastIBLMode = Root.IBLMode;
 		ImGui::Text("IBL Mode");
 		const char* items[] = { "Split Sum Approximation", "Spherical Harmonics Exponential (Specular Only)", "Reference" };
 		ImGui::Combo("##IBLMode", &(Root.IBLMode), items, IM_ARRAYSIZE(items));
+	}
+
+	{
+		if (Root.IBLMode == IBL_MODE_REFERENCE)
+		{
+			ImGui::Checkbox("Progressive Rendering", &Root.bUseProgressiveRendering);
+		}
 	}
 
 	ImGui::End();
@@ -119,7 +134,7 @@ static void Update(FDemoRoot& Root)
 {
 	double Time;
 	float DeltaTime;
-	UpdateFrameStats(Root.Gfx.Window, "ImageBasedPBR", Time, DeltaTime);
+	UpdateFrameStats(Root.Gfx.Window, "ImageBasedPBR", Time, DeltaTime, Root.NumFrames);
 	UpdateUI(Root, DeltaTime);
 
 	// Update camera position.
@@ -151,6 +166,25 @@ static void Draw(FDemoRoot& Root)
 	const XMMATRIX ViewTransform = XMMatrixLookAtLH(XMLoadFloat3(&Root.CameraPosition), XMLoadFloat3(&Root.CameraFocusPosition), XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f));
 	const XMMATRIX ProjectionTransform = XMMatrixPerspectiveFovLH(XM_PI / 3, 1.777f, 0.1f, 100.0f);
 
+	// Clear accumulation buffer if needed.
+	if (Root.LastMaterialMode != Root.MaterialMode || Root.LastIBLMode != Root.IBLMode || !Root.bUseProgressiveRendering)
+	{
+		Root.NumFrames = 0;
+
+		D3D12_CPU_DESCRIPTOR_HANDLE AccumulationBufferUAV = AllocateDescriptors(Gfx, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1);
+
+		D3D12_UNORDERED_ACCESS_VIEW_DESC AccumulationBufferUAVDesc = {};
+		AccumulationBufferUAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+		AccumulationBufferUAVDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		AccumulationBufferUAVDesc.Texture2D.MipSlice = 0;
+		AccumulationBufferUAVDesc.Texture2D.PlaneSlice = 0;
+
+		Gfx.Device->CreateUnorderedAccessView(Root.AccumulationBuffer, nullptr, &AccumulationBufferUAVDesc, AccumulationBufferUAV);
+
+		float clearColor[4] = {0,0,0,0};
+		CmdList->ClearUnorderedAccessViewFloat(CopyDescriptorsToGPUHeap(Gfx, 1, AccumulationBufferUAV), AccumulationBufferUAV, Root.AccumulationBuffer, clearColor, 0, nullptr);
+	}
+
 	// Draw all static mesh instances.
 	{
 		CmdList->SetPipelineState(Root.Pipelines[PSO_SimpleForward]);
@@ -173,13 +207,15 @@ static void Draw(FDemoRoot& Root)
 
 			const XMFLOAT3 P = Root.CameraPosition;
 			CPUAddress->ViewerPosition = XMFLOAT4(P.x, P.y, P.z, 1.0f);
-
+			CPUAddress->ViewportSize = XMFLOAT2((float)Gfx.Resolution[0], (float)Gfx.Resolution[1]);
 			CPUAddress->MaterialMode = Root.MaterialMode;
 			CPUAddress->IBLMode = Root.IBLMode;
+			CPUAddress->NumFrames = Root.NumFrames;
+			CPUAddress->bUseProgressiveRendering = Root.bUseProgressiveRendering;
 
 			CD3DX12_CPU_DESCRIPTOR_HANDLE TableBaseCPU;
 			CD3DX12_GPU_DESCRIPTOR_HANDLE TableBaseGPU;
-			AllocateGPUDescriptors(Gfx, 5, TableBaseCPU, TableBaseGPU);
+			AllocateGPUDescriptors(Gfx, 6, TableBaseCPU, TableBaseGPU);
 
 			D3D12_CONSTANT_BUFFER_VIEW_DESC CBVDesc = {};
 			CBVDesc.BufferLocation = GPUAddress;
@@ -198,6 +234,9 @@ static void Draw(FDemoRoot& Root)
 			TableBaseCPU.Offset(Gfx.DescriptorSize);
 
 			Gfx.Device->CopyDescriptorsSimple(1, TableBaseCPU, Root.BRDFIntegrationMapSRV, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+			TableBaseCPU.Offset(Gfx.DescriptorSize);
+
+			Gfx.Device->CopyDescriptorsSimple(1, TableBaseCPU, Root.AccumulationBufferSRV, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 			TableBaseCPU.Offset(Gfx.DescriptorSize);
 
 			CmdList->SetGraphicsRootDescriptorTable(1, TableBaseGPU);
@@ -238,6 +277,18 @@ static void Draw(FDemoRoot& Root)
 			GPUAddress += sizeof(FPerDrawConstantData);
 			CPUAddress++;
 		}
+	}
+
+	// Copy color buffer to accumulation buffer.
+	{
+		if (Root.bUseProgressiveRendering)
+		{
+			CmdList->ResourceBarrier(1, get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(Root.AccumulationBuffer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST)));
+			CmdList->ResourceBarrier(1, get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(Root.MSColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE)));
+			CmdList->ResolveSubresource(Root.AccumulationBuffer, 0, Root.MSColorBuffer, 0, DXGI_FORMAT_R8G8B8A8_UNORM);
+			CmdList->ResourceBarrier(1, get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(Root.AccumulationBuffer, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)));
+			CmdList->ResourceBarrier(1, get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(Root.MSColorBuffer, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET)));
+		}	
 	}
 
 	// Draw EnvMap.
@@ -1019,6 +1070,25 @@ static void Initialize(FDemoRoot& Root)
 		Gfx.Device->CreateDepthStencilView(Root.MSDepthBuffer, nullptr, Root.MSDepthBufferDSV);
 	}
 
+	// Create accumulation buffer.
+	{
+		CD3DX12_RESOURCE_DESC DescAccum = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, Gfx.Resolution[0], Gfx.Resolution[1],
+    		1, 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+
+		VHR(Gfx.Device->CreateCommittedResource(get_rvalue_ptr(CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT)), D3D12_HEAP_FLAG_NONE,
+    		&DescAccum, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&Root.AccumulationBuffer)));
+
+		Root.AccumulationBufferSRV = AllocateDescriptors(Gfx, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1);
+
+		D3D12_SHADER_RESOURCE_VIEW_DESC SRVDesc = {};
+		SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+		SRVDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		SRVDesc.Texture2D.MipLevels = 1;
+		SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+
+		Gfx.Device->CreateShaderResourceView(Root.AccumulationBuffer, &SRVDesc, Root.AccumulationBufferSRV);
+	}
+
 	// Execute "data upload" and "data generation" GPU commands, create mipmaps, destroy temp resources when GPU is done.
 	{
 		const DXGI_FORMAT Formats[] = { DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R8G8B8A8_UNORM };
@@ -1059,6 +1129,10 @@ static void Initialize(FDemoRoot& Root)
 	//Root.CameraPosition = XMFLOAT3(0.0f, 0.0f, -10.0f);
 	Root.CameraPosition = XMFLOAT3(0.0f, 0.0f, 12.0f);
 	Root.CameraFocusPosition = XMFLOAT3(0.0f, 0.0f, 0.0f);
+
+	Root.LastIBLMode = Root.IBLMode = Root.LastMaterialMode = Root.MaterialMode = 0;
+	Root.NumFrames = 0;
+	Root.bUseProgressiveRendering = true;
 }
 
 static void Shutdown(FDemoRoot& Root)
@@ -1079,6 +1153,7 @@ static void Shutdown(FDemoRoot& Root)
 	SAFE_RELEASE(Root.BRDFIntegrationMap);
 	SAFE_RELEASE(Root.MSColorBuffer);
 	SAFE_RELEASE(Root.MSDepthBuffer);
+	SAFE_RELEASE(Root.AccumulationBuffer);
 	DestroyUIContext(Root.UI);
 }
 

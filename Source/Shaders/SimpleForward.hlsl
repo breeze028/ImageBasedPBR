@@ -4,7 +4,7 @@
 #define GRootSignature                                                                                     \
 	"RootFlags(ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT), "                                                      \
 	"CBV(b0), "                                                                                            \
-	"DescriptorTable(CBV(b1), SRV(t0), SRV(t1), SRV(t2), SRV(t3), visibility = SHADER_VISIBILITY_PIXEL), " \
+	"DescriptorTable(CBV(b1), SRV(t0), SRV(t1), SRV(t2), SRV(t3), SRV(t4), visibility = SHADER_VISIBILITY_PIXEL), " \
 	"StaticSampler("                                                                                       \
 	"s0, "                                                                                                 \
 	"filter = FILTER_MIN_MAG_MIP_LINEAR, "                                                                 \
@@ -19,6 +19,7 @@ TextureCube GIrradianceMap : register(t0);
 TextureCube GPrefilteredEnvMap : register(t1);
 TextureCube GEnvMap : register(t2);
 Texture2D GBRDFIntegrationMap : register(t3);
+Texture2D GAccumulationBuffer : register(t4);
 SamplerState GSampler : register(s0);
 
 // Trowbridge-Reitz GGX normal distribution function.
@@ -109,7 +110,7 @@ float3 FresnelSchlickRoughness(float CosTheta, float3 F0, float Roughness)
 
 	float3 Diffuse = 0.0f;
 	float3 Specular = 0.0f;
-	if (GPerFrameCB.IBLMode == 0)
+	if (GPerFrameCB.IBLMode == IBL_MODE_SPLIT_SUM_APPROXIMATION)
 	{
 		// Split Sum Approximation
 		float3 Irradiance = GIrradianceMap.SampleLevel(GSampler, N, 0.0f).rgb;
@@ -119,19 +120,27 @@ float3 FresnelSchlickRoughness(float CosTheta, float3 F0, float Roughness)
 		float2 EnvBRDF = GBRDFIntegrationMap.SampleLevel(GSampler, float2(min(NoV, 0.999f), Roughness), 0.0f).rg;
 		Specular = PrefilteredColor * (F * EnvBRDF.x + EnvBRDF.y);
 	}
-	else if (GPerFrameCB.IBLMode == 1)
+	else if (GPerFrameCB.IBLMode == IBL_MODE_SPHERICAL_HARMONICS_EXPONENTIAL)
 	{
 		// Spherical Harmonics Exponential (Specular only)
 	}
-	else if (GPerFrameCB.IBLMode == 2)
+	else if (GPerFrameCB.IBLMode == IBL_MODE_REFERENCE)
 	{
 		// Reference
-		const uint NumSamples = 512;
+		uint NumSamples = 128;
+		if (!GPerFrameCB.bUseProgressiveRendering)
+		{
+			NumSamples = 512;
+		}
 		float3 Irradiance = 0.0f;
 
-		for (uint SampleIdx = 0; SampleIdx < NumSamples; ++SampleIdx)
+		for (uint DiffuseSampleIdx = 0; DiffuseSampleIdx < NumSamples; ++DiffuseSampleIdx)
 		{
-			float2 Xi = Hammersley(SampleIdx, NumSamples);
+			float2 Xi = HaltonSequence2D(DiffuseSampleIdx + GPerFrameCB.NumFrames * NumSamples);
+			if (!GPerFrameCB.bUseProgressiveRendering)
+			{
+				Xi = Hammersley(DiffuseSampleIdx, NumSamples);
+			}
 			float3 L = CosineSampleHemisphere(Xi, N);
 
 			float NoL = saturate(dot(N, L));
@@ -141,9 +150,13 @@ float3 FresnelSchlickRoughness(float CosTheta, float3 F0, float Roughness)
 			}
 		}
 
-		for (uint SampleIdx = 0; SampleIdx < NumSamples; ++SampleIdx)
+		for (uint SpecularSampleIdx = 0; SpecularSampleIdx < NumSamples; ++SpecularSampleIdx)
 		{
-			float2 Xi = Hammersley(SampleIdx, NumSamples);
+			float2 Xi = HaltonSequence2D(SpecularSampleIdx + GPerFrameCB.NumFrames * NumSamples);
+			if (!GPerFrameCB.bUseProgressiveRendering  )
+			{
+				Xi = Hammersley(SpecularSampleIdx, NumSamples);
+			}
 			float3 H = ImportanceSampleGGX(Xi, Roughness, N);
 			float3 L = normalize(2.0f * dot(V, H) * H - V);
 
@@ -165,17 +178,17 @@ float3 FresnelSchlickRoughness(float CosTheta, float3 F0, float Roughness)
 	}
 
 	float3 Ambient = 0.0f;
-	if (GPerFrameCB.MaterialMode == 0)
+	if (GPerFrameCB.MaterialMode == MATERIAL_MODE_DIFFUSE_AND_SPECULAR)
 	{
 		// Diffuse + Specular
 		Ambient = KD * Diffuse + Specular;
 	}
-	else if (GPerFrameCB.MaterialMode == 1)
+	else if (GPerFrameCB.MaterialMode == MATERIAL_MODE_DIFFUSE_ONLY)
 	{
 		// Diffuse only
 		Ambient = KD * Diffuse;
 	}
-	else if (GPerFrameCB.MaterialMode == 2)
+	else if (GPerFrameCB.MaterialMode == MATERIAL_MODE_SPECULAR_ONLY)
 	{
 		// Specular only
 		Ambient = Specular;
@@ -186,5 +199,12 @@ float3 FresnelSchlickRoughness(float CosTheta, float3 F0, float Roughness)
 	Color = Color / (Color + 1.0f);
 	Color = pow(Color, 1.0f / 2.2f);
 
+	if (GPerFrameCB.IBLMode == IBL_MODE_REFERENCE && GPerFrameCB.NumFrames > 0)
+	{
+		// Progressive rendering for reference mode
+		float3 AccumulatedColor = GAccumulationBuffer.SampleLevel(GSampler, InPosition.xy / GPerFrameCB.ViewportSize, 0).rgb;
+		Color = (AccumulatedColor * (GPerFrameCB.NumFrames - 1) + Color) / GPerFrameCB.NumFrames;
+	}
+	
 	OutColor = float4(Color, 1.0f);
 }

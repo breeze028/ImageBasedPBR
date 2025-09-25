@@ -97,7 +97,7 @@ void DestroyUIContext(FUIContext& UI);
 void DrawUI(FGraphicsContext& Gfx, FUIContext& UI);
 
 eastl::vector<uint8_t> LoadFile(const char* Name);
-void UpdateFrameStats(HWND Window, const char* Name, double& OutTime, float& OutDeltaTime);
+void UpdateFrameStats(HWND Window, const char* Name, double& OutTime, float& OutDeltaTime, uint32_t& OutNumFrames);
 double GetTime();
 HWND CreateSimpleWindow(const char* Name, uint32_t Width, uint32_t Height);
 

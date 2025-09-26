@@ -120,13 +120,6 @@ static void UpdateUI(FDemoRoot& Root, float DeltaTime)
 		ImGui::Combo("##IBLMode", &(Root.IBLMode), items, IM_ARRAYSIZE(items));
 	}
 
-	{
-		if (Root.IBLMode == IBL_MODE_REFERENCE)
-		{
-			ImGui::Checkbox("Progressive Rendering", &Root.bUseProgressiveRendering);
-		}
-	}
-
 	ImGui::End();
 }
 
@@ -211,7 +204,6 @@ static void Draw(FDemoRoot& Root)
 			CPUAddress->MaterialMode = Root.MaterialMode;
 			CPUAddress->IBLMode = Root.IBLMode;
 			CPUAddress->NumFrames = Root.NumFrames;
-			CPUAddress->bUseProgressiveRendering = Root.bUseProgressiveRendering;
 
 			CD3DX12_CPU_DESCRIPTOR_HANDLE TableBaseCPU;
 			CD3DX12_GPU_DESCRIPTOR_HANDLE TableBaseGPU;

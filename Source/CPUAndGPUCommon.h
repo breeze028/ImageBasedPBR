@@ -42,7 +42,6 @@ struct SALIGN FPerFrameConstantData
 	int MaterialMode;
 	int IBLMode;
 	uint32_t NumFrames;
-	bool bUseProgressiveRendering;
 };
 
 #ifdef __cplusplus

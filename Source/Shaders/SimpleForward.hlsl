@@ -112,7 +112,6 @@ float3 FresnelSchlickRoughness(float CosTheta, float3 F0, float Roughness)
 	float3 Specular = 0.0f;
 	if (GPerFrameCB.IBLMode == IBL_MODE_SPLIT_SUM_APPROXIMATION)
 	{
-		// Split Sum Approximation
 		float3 Irradiance = GIrradianceMap.SampleLevel(GSampler, N, 0.0f).rgb;
 		Diffuse = Irradiance * Albedo;
 
@@ -122,30 +121,21 @@ float3 FresnelSchlickRoughness(float CosTheta, float3 F0, float Roughness)
 	}
 	else if (GPerFrameCB.IBLMode == IBL_MODE_SPHERICAL_HARMONICS_EXPONENTIAL)
 	{
-		// Spherical Harmonics Exponential (Specular only)
 	}
 	else if (GPerFrameCB.IBLMode == IBL_MODE_REFERENCE)
 	{
-		// Reference
 		uint NumSamples = 128;
-		if (!GPerFrameCB.bUseProgressiveRendering)
-		{
-			NumSamples = 512;
-		}
 		float3 Irradiance = 0.0f;
 
 		for (uint DiffuseSampleIdx = 0; DiffuseSampleIdx < NumSamples; ++DiffuseSampleIdx)
 		{
 			float2 Xi = HaltonSequence2D(DiffuseSampleIdx + GPerFrameCB.NumFrames * NumSamples);
-			if (!GPerFrameCB.bUseProgressiveRendering)
-			{
-				Xi = Hammersley(DiffuseSampleIdx, NumSamples);
-			}
 			float3 L = CosineSampleHemisphere(Xi, N);
 
 			float NoL = saturate(dot(N, L));
 			if (NoL > 0.0f)
 			{
+				// Standard way of cosine importance sampling, no need to multiply by NoL.
 				Irradiance += GEnvMap.SampleLevel(GSampler, L, 0).rgb;
 			}
 		}
@@ -153,10 +143,6 @@ float3 FresnelSchlickRoughness(float CosTheta, float3 F0, float Roughness)
 		for (uint SpecularSampleIdx = 0; SpecularSampleIdx < NumSamples; ++SpecularSampleIdx)
 		{
 			float2 Xi = HaltonSequence2D(SpecularSampleIdx + GPerFrameCB.NumFrames * NumSamples);
-			if (!GPerFrameCB.bUseProgressiveRendering  )
-			{
-				Xi = Hammersley(SpecularSampleIdx, NumSamples);
-			}
 			float3 H = ImportanceSampleGGX(Xi, Roughness, N);
 			float3 L = normalize(2.0f * dot(V, H) * H - V);
 
@@ -180,31 +166,30 @@ float3 FresnelSchlickRoughness(float CosTheta, float3 F0, float Roughness)
 	float3 Ambient = 0.0f;
 	if (GPerFrameCB.MaterialMode == MATERIAL_MODE_DIFFUSE_AND_SPECULAR)
 	{
-		// Diffuse + Specular
 		Ambient = KD * Diffuse + Specular;
 	}
 	else if (GPerFrameCB.MaterialMode == MATERIAL_MODE_DIFFUSE_ONLY)
 	{
-		// Diffuse only
 		Ambient = KD * Diffuse;
 	}
 	else if (GPerFrameCB.MaterialMode == MATERIAL_MODE_SPECULAR_ONLY)
 	{
-		// Specular only
 		Ambient = Specular;
 	}
 	Ambient *= AO;
 
 	float3 Color = Ambient + Lo;
-	Color = Color / (Color + 1.0f);
-	Color = pow(Color, 1.0f / 2.2f);
 
 	if (GPerFrameCB.IBLMode == IBL_MODE_REFERENCE && GPerFrameCB.NumFrames > 0)
 	{
 		// Progressive rendering for reference mode
 		float3 AccumulatedColor = GAccumulationBuffer.SampleLevel(GSampler, InPosition.xy / GPerFrameCB.ViewportSize, 0).rgb;
-		Color = (AccumulatedColor * (GPerFrameCB.NumFrames - 1) + Color) / GPerFrameCB.NumFrames;
+		float3 AccumulatedLinearColor = pow(AccumulatedColor, 2.2f);
+		float3 AccumulatedHDRColor = AccumulatedLinearColor / (1.0f - AccumulatedLinearColor);
+		Color = (AccumulatedHDRColor * (GPerFrameCB.NumFrames - 1) + Color) / GPerFrameCB.NumFrames;
 	}
-	
+
+	Color = Color / (Color + 1.0f);
+	Color = pow(Color, 1.0f / 2.2f);
 	OutColor = float4(Color, 1.0f);
 }

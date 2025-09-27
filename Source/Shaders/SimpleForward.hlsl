@@ -183,7 +183,9 @@ float3 FresnelSchlickRoughness(float CosTheta, float3 F0, float Roughness)
 	if (GPerFrameCB.IBLMode == IBL_MODE_REFERENCE && GPerFrameCB.NumFrames > 0)
 	{
 		// Progressive rendering for reference mode
-		float3 AccumulatedColor = GAccumulationBuffer.SampleLevel(GSampler, InPosition.xy / GPerFrameCB.ViewportSize, 0).rgb;
+		uint2 Dimensions;
+		GAccumulationBuffer.GetDimensions(Dimensions.x, Dimensions.y);
+		float3 AccumulatedColor = GAccumulationBuffer.SampleLevel(GSampler, InPosition.xy / Dimensions, 0).rgb;
 		float3 AccumulatedLinearColor = pow(AccumulatedColor, 2.2f);
 		float3 AccumulatedHDRColor = AccumulatedLinearColor / (1.0f - AccumulatedLinearColor);
 		Color = (AccumulatedHDRColor * (GPerFrameCB.NumFrames - 1) + Color) / GPerFrameCB.NumFrames;

@@ -38,7 +38,6 @@ struct SALIGN FPerFrameConstantData
 	float4 LightPositions[4];
 	float4 LightColors[4];
 	float4 ViewerPosition;
-	float2 ViewportSize;
 	int MaterialMode;
 	int IBLMode;
 	uint32_t NumFrames;

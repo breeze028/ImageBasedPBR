@@ -200,7 +200,6 @@ static void Draw(FDemoRoot& Root)
 
 			const XMFLOAT3 P = Root.CameraPosition;
 			CPUAddress->ViewerPosition = XMFLOAT4(P.x, P.y, P.z, 1.0f);
-			CPUAddress->ViewportSize = XMFLOAT2((float)Gfx.Resolution[0], (float)Gfx.Resolution[1]);
 			CPUAddress->MaterialMode = Root.MaterialMode;
 			CPUAddress->IBLMode = Root.IBLMode;
 			CPUAddress->NumFrames = Root.NumFrames;

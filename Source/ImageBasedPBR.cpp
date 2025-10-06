@@ -90,7 +90,6 @@ struct FDemoRoot
 	int MaterialMode;
 	int IBLMode;
 	uint32_t NumFrames;
-	bool bUseProgressiveRendering;
 };
 
 static void UpdateUI(FDemoRoot& Root, float DeltaTime)
@@ -160,7 +159,7 @@ static void Draw(FDemoRoot& Root)
 	const XMMATRIX ProjectionTransform = XMMatrixPerspectiveFovLH(XM_PI / 3, 1.777f, 0.1f, 100.0f);
 
 	// Clear accumulation buffer if needed.
-	if (Root.LastMaterialMode != Root.MaterialMode || Root.LastIBLMode != Root.IBLMode || !Root.bUseProgressiveRendering)
+	if (Root.LastMaterialMode != Root.MaterialMode || Root.LastIBLMode != Root.IBLMode)
 	{
 		Root.NumFrames = 0;
 
@@ -272,14 +271,11 @@ static void Draw(FDemoRoot& Root)
 
 	// Copy color buffer to accumulation buffer.
 	{
-		if (Root.bUseProgressiveRendering)
-		{
-			CmdList->ResourceBarrier(1, get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(Root.AccumulationBuffer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST)));
-			CmdList->ResourceBarrier(1, get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(Root.MSColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE)));
-			CmdList->ResolveSubresource(Root.AccumulationBuffer, 0, Root.MSColorBuffer, 0, DXGI_FORMAT_R8G8B8A8_UNORM);
-			CmdList->ResourceBarrier(1, get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(Root.AccumulationBuffer, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)));
-			CmdList->ResourceBarrier(1, get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(Root.MSColorBuffer, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET)));
-		}	
+		CmdList->ResourceBarrier(1, get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(Root.AccumulationBuffer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST)));
+		CmdList->ResourceBarrier(1, get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(Root.MSColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE)));
+		CmdList->ResolveSubresource(Root.AccumulationBuffer, 0, Root.MSColorBuffer, 0, DXGI_FORMAT_R8G8B8A8_UNORM);
+		CmdList->ResourceBarrier(1, get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(Root.AccumulationBuffer, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)));
+		CmdList->ResourceBarrier(1, get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(Root.MSColorBuffer, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET)));
 	}
 
 	// Draw EnvMap.
@@ -1123,7 +1119,6 @@ static void Initialize(FDemoRoot& Root)
 
 	Root.LastIBLMode = Root.IBLMode = Root.LastMaterialMode = Root.MaterialMode = 0;
 	Root.NumFrames = 0;
-	Root.bUseProgressiveRendering = true;
 }
 
 static void Shutdown(FDemoRoot& Root)
